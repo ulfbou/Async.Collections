@@ -1,11 +1,13 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
+using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 
 namespace Async.Collections;
 
-public class ConcurrentDisposableCollection<T> : IAsyncDisposable
+public class ConcurrentDisposableCollection<T> : IAsyncEnumerable<T>, IAsyncDisposable, IEnumerable<T>
     where T : class, IDisposable
 {
     private readonly ConcurrentBag<T> _items = new ConcurrentBag<T>();
@@ -73,5 +75,17 @@ public class ConcurrentDisposableCollection<T> : IAsyncDisposable
         });
 
         await Task.WhenAll(tasks);
+    }
+
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() => ((IEnumerable)_items).GetEnumerator();
+    public async IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
+    {
+        foreach (var item in _items)
+        {
+            yield return item;
+        }
+
+        await Task.CompletedTask;
     }
 }
