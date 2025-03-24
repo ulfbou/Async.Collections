@@ -1,17 +1,16 @@
 ﻿// Copyright (c) FluentInjections Project. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
-using System.Collections;
+using Microsoft.Extensions.Logging;
 
-// Copyright (c) FluentInjections Project. All rights reserved.
-// Licensed under the MIT License. See LICENSE in the project root for license information.
+using System.Collections;
 
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 
-namespace Async.Collections.Tests
+namespace Async.Collections
 {
-    public class ObservableConcurrentDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IObservable<CollectionChange<TKey, TValue>>
+    public class AsyncObservableDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IObservable<CollectionChange<TKey, TValue>>
         where TKey : notnull
     {
         private readonly ConcurrentDictionary<TKey, TValue> _dictionary = new ConcurrentDictionary<TKey, TValue>();
@@ -19,6 +18,7 @@ namespace Async.Collections.Tests
 
         private readonly List<Action<CollectionChange<TKey, TValue>>> _observers = new List<Action<CollectionChange<TKey, TValue>>>();
         private readonly object _lock = new object();
+        private readonly ILogger<AsyncObservableDictionary<TKey, TValue>> _logger;
 
         public TValue this[TKey key] { get => _dictionary[key]; set => _dictionary[key] = value; }
 
@@ -27,12 +27,17 @@ namespace Async.Collections.Tests
         public int Count => _dictionary.Count;
         public bool IsReadOnly => false;
 
+        public AsyncObservableDictionary(ILogger<AsyncObservableDictionary<TKey, TValue>> logger)
+        {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
         public void Add(TKey key, TValue value)
         {
             if (_dictionary.TryAdd(key, value))
             {
                 NotifyObservers(new CollectionChange<TKey, TValue>(CollectionChangeType.Add, key, value));
-                _ = NotifyObserversAsync(new CollectionChange<TKey, TValue>(CollectionChangeType.Add, key, value)); // call async observers.
+                _ = NotifyObserversAsync(new CollectionChange<TKey, TValue>(CollectionChangeType.Add, key, value));
             }
             else
             {
@@ -45,9 +50,10 @@ namespace Async.Collections.Tests
             if (_dictionary.TryAdd(key, value))
             {
                 NotifyObservers(new CollectionChange<TKey, TValue>(CollectionChangeType.Add, key, value));
-                _ = NotifyObserversAsync(new CollectionChange<TKey, TValue>(CollectionChangeType.Add, key, value)); // call async observers.
+                _ = NotifyObserversAsync(new CollectionChange<TKey, TValue>(CollectionChangeType.Add, key, value));
                 return true;
             }
+
             return false;
         }
 
@@ -56,20 +62,22 @@ namespace Async.Collections.Tests
             if (_dictionary.TryUpdate(key, newValue, comparisonValue))
             {
                 NotifyObservers(new CollectionChange<TKey, TValue>(CollectionChangeType.Update, key, newValue));
-                _ = NotifyObserversAsync(new CollectionChange<TKey, TValue>(CollectionChangeType.Update, key, newValue)); // call async observers.
+                _ = NotifyObserversAsync(new CollectionChange<TKey, TValue>(CollectionChangeType.Update, key, newValue));
                 return true;
             }
+
             return false;
         }
 
-        public bool TryRemove(TKey key, out TValue value)
+        public bool TryRemove(TKey key, out TValue? value)
         {
             if (_dictionary.TryRemove(key, out value))
             {
                 NotifyObservers(new CollectionChange<TKey, TValue>(CollectionChangeType.Remove, key, value));
-                _ = NotifyObserversAsync(new CollectionChange<TKey, TValue>(CollectionChangeType.Remove, key, value)); // call async observers.
+                _ = NotifyObserversAsync(new CollectionChange<TKey, TValue>(CollectionChangeType.Remove, key, value));
                 return true;
             }
+
             return false;
         }
 
@@ -85,7 +93,7 @@ namespace Async.Collections.Tests
                     }
                     catch (Exception ex)
                     {
-                        //Log the exception
+                        _logger.LogError(ex, "Error notifying observer");
                     }
                 }
             }
@@ -167,23 +175,33 @@ namespace Async.Collections.Tests
 
         private class Unsubscriber : IDisposable
         {
-            private readonly ObservableConcurrentDictionary<TKey, TValue> _dictionary;
+            private readonly AsyncObservableDictionary<TKey, TValue> _dictionary;
             private readonly Action<Func<CollectionChange<TKey, TValue>, ValueTask>> _unsubscribe;
             private readonly Func<CollectionChange<TKey, TValue>, ValueTask> _observer;
             private readonly Action<Action<CollectionChange<TKey, TValue>>> _unsubscribeAction;
             private readonly Action<CollectionChange<TKey, TValue>> _actionObserver;
 
-            public Unsubscriber(ObservableConcurrentDictionary<TKey, TValue> dictionary, Action<Func<CollectionChange<TKey, TValue>, ValueTask>> unsubscribe, Func<CollectionChange<TKey, TValue>, ValueTask> observer)
+            public Unsubscriber(
+                AsyncObservableDictionary<TKey, TValue> dictionary,
+                Action<Func<CollectionChange<TKey, TValue>, ValueTask>> unsubscribe,
+                Func<CollectionChange<TKey, TValue>, ValueTask> observer)
             {
                 _dictionary = dictionary;
                 _unsubscribe = unsubscribe;
+                _unsubscribeAction = default!;
                 _observer = observer;
+                _actionObserver = default!;
             }
 
-            public Unsubscriber(ObservableConcurrentDictionary<TKey, TValue> dictionary, Action<Action<CollectionChange<TKey, TValue>>> unsubscribe, Action<CollectionChange<TKey, TValue>> observer)
+            public Unsubscriber(
+                AsyncObservableDictionary<TKey, TValue> dictionary,
+                Action<Action<CollectionChange<TKey, TValue>>> unsubscribe,
+                Action<CollectionChange<TKey, TValue>> observer)
             {
                 _dictionary = dictionary;
+                _unsubscribe = default!;
                 _unsubscribeAction = unsubscribe;
+                _observer = default!;
                 _actionObserver = observer;
             }
 
@@ -200,6 +218,7 @@ namespace Async.Collections.Tests
             }
         }
     }
+
     public struct CollectionChange<TKey, TValue>
     {
         public CollectionChangeType ChangeType;
