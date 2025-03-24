@@ -3,7 +3,7 @@
 
 using System.Collections.Concurrent;
 
-namespace Async.Collections.Tests
+namespace Async.Collections
 {
     public class AsyncQueue<T>
     {

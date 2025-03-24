@@ -3,7 +3,7 @@
 
 using System.Collections.Concurrent;
 
-namespace Async.Collections.Tests
+namespace Async.Collections
 {
     public class AsyncGraphCollection<TNode, TNodeId> where TNodeId : notnull
     {
@@ -86,6 +86,26 @@ namespace Async.Collections.Tests
             }
 
             return result;
+        }
+
+        internal ValueTask<TNode?> GetNodeAsync(TNodeId nodeId, CancellationToken cancellationToken = default)
+        {
+            _nodes.TryGetValue(nodeId, out TNode? node);
+            return ValueTask.FromResult(node);
+        }
+
+        internal ValueTask<bool> ContainsEdgeAsync(TNodeId fromNodeId, TNodeId toNodeId, CancellationToken cancellationToken = default)
+        {
+            if (_edges.TryGetValue(fromNodeId, out var neighbors))
+            {
+                return ValueTask.FromResult(neighbors.ContainsKey(toNodeId));
+            }
+            return ValueTask.FromResult(false);
+        }
+
+        internal ValueTask<bool> ContainsNodeAsync(TNodeId nodeId, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(_nodes.ContainsKey(nodeId));
         }
     }
 }
