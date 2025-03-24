@@ -1,18 +1,25 @@
 ﻿// Copyright (c) FluentInjections Project. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+
 namespace Async.Collections
 {
-    public class AsyncDisposableCollection<T> : IAsyncEnumerable<T>, IAsyncDisposable, IEnumerable<T>
+    public class AsyncDisposableCollection<T> : IAsyncEnumerable<T>, IAsyncDisposable
         where T : class, IDisposable
     {
         private readonly ConcurrentBag<T> _items = new ConcurrentBag<T>();
         private readonly object _lock = new object();
-        private readonly ILogger<ConcurrentDisposableCollection<T>> _logger;
+        private readonly ILogger<AsyncDisposableCollection<T>> _logger;
 
-        public AsyncDisposableCollection(ILogger<ConcurrentDisposableCollection<T>>? logger = default)
+        public AsyncDisposableCollection(ILogger<AsyncDisposableCollection<T>>? logger = default)
         {
-            _logger = logger ?? NullLogger<ConcurrentDisposableCollection<T>>.Instance;
+            _logger = logger ?? NullLogger<AsyncDisposableCollection<T>>.Instance;
         }
 
         public void Add(T item)
@@ -39,6 +46,33 @@ namespace Async.Collections
 
                 return removed;
             }
+        }
+
+        public async IAsyncEnumerable<T> ToListAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            List<T> items;
+
+            lock (_lock)
+            {
+                items = _items.ToList();
+            }
+
+            foreach (var item in items)
+            {
+                yield return item;
+            }
+
+            await Task.CompletedTask;
+        }
+
+        public async IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
+        {
+            foreach (var item in _items)
+            {
+                yield return item;
+            }
+
+            await Task.CompletedTask;
         }
 
         public async ValueTask DisposeAsync()
@@ -71,18 +105,6 @@ namespace Async.Collections
             });
 
             await Task.WhenAll(tasks);
-        }
-
-        public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
-        IEnumerator IEnumerable.GetEnumerator() => ((IEnumerable)_items).GetEnumerator();
-        public async IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
-        {
-            foreach (var item in _items)
-            {
-                yield return item;
-            }
-
-            await Task.CompletedTask;
         }
     }
 }

@@ -1,13 +1,10 @@
 ﻿// Copyright (c) FluentInjections Project. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
+using System.Collections.Generic;
+
 namespace Async.Collections
 {
-    using System.Collections.Generic;
-    using System.Linq;
-    using System.Threading;
-    using System.Threading.Tasks;
-
     public abstract class AsyncObservableCollectionBase<TChange> : IAsyncDisposable
     {
         private readonly List<Func<TChange, ValueTask>> _asyncObservers = new();
@@ -88,9 +85,3 @@ namespace Async.Collections
         }
     }
 }
-using Microsoft.Extensions.Logging;
-
-using System.Collections;
-
-using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;

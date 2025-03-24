@@ -7,10 +7,15 @@ using System.Collections;
 
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace Async.Collections
 {
-    public class AsyncObservableDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IObservable<CollectionChange<TKey, TValue>>
+    public class AsyncObservableDictionary<TKey, TValue> :
+            IDictionary<TKey, TValue>,
+            IObservable<CollectionChange<TKey, TValue>>,
+            IAsyncEnumerable<KeyValuePair<TKey, TValue>>,
+            IAsyncDisposable
         where TKey : notnull
     {
         private readonly ConcurrentDictionary<TKey, TValue> _dictionary = new ConcurrentDictionary<TKey, TValue>();
@@ -168,10 +173,53 @@ namespace Async.Collections
             return false;
         }
 
-        public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator() => _dictionary.GetEnumerator();
-
         public bool TryGetValue(TKey key, [MaybeNullWhen(false)] out TValue value) => ((IDictionary<TKey, TValue>)_dictionary).TryGetValue(key, out value);
-        IEnumerator IEnumerable.GetEnumerator() => ((IEnumerable)_dictionary).GetEnumerator();
+
+        public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator()
+        {
+            return ((IEnumerable<KeyValuePair<TKey, TValue>>)_dictionary).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return ((IEnumerable)_dictionary).GetEnumerator();
+        }
+
+        public async IAsyncEnumerator<KeyValuePair<TKey, TValue>> GetAsyncEnumerator(CancellationToken cancellationToken = default)
+        {
+            KeyValuePair<TKey, TValue>[] items;
+
+            lock (_lock)
+            {
+                items = _dictionary.ToArray();
+            }
+
+            foreach (var item in items)
+            {
+                yield return item;
+            }
+
+            await Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            List<Func<CollectionChange<TKey, TValue>, ValueTask>> asyncObserversCopy;
+            List<Action<CollectionChange<TKey, TValue>>> observersCopy;
+
+            lock (_lock)
+            {
+                asyncObserversCopy = new List<Func<CollectionChange<TKey, TValue>, ValueTask>>(_asyncObservers);
+                observersCopy = new List<Action<CollectionChange<TKey, TValue>>>(_observers);
+                _asyncObservers.Clear();
+                _observers.Clear();
+            }
+
+            asyncObserversCopy.Clear();
+            observersCopy.Clear();
+
+            return ValueTask.CompletedTask;
+        }
 
         private class Unsubscriber : IDisposable
         {
