@@ -27,9 +27,14 @@ namespace Async.Collections
             _evictionTask = Task.Run(EvictExpiredItemsAsync);
         }
 
-        public async ValueTask<TValue> GetOrAddAsync(TKey key, Func<Task<TValue>> valueFactory, CancellationToken cancellationToken = default)
+        public async ValueTask<TValue> GetOrAddAsync(TKey key, Func<ValueTask<TValue>> valueFactory, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
+
+            if (key is null)
+            {
+                throw new ArgumentException("Key cannot be null.", nameof(key));
+            }
 
             if (_cache.TryGetValue(key, out var cacheItem))
             {
@@ -157,7 +162,7 @@ namespace Async.Collections
             _cancellationTokenSource.Dispose();
         }
 
-        private class CacheItem<T>
+        internal class CacheItem<T>
         {
             public required T Value { get; set; }
             public DateTime LastAccessed { get; set; }
