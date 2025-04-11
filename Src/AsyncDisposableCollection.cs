@@ -1,6 +1,8 @@
 ﻿// Copyright (c) FluentInjections Project. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
+using Async.Locks;
+
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -13,22 +15,16 @@ namespace Async.Collections
         where T : class, IDisposable
     {
         private readonly ConcurrentBag<T> _items = new ConcurrentBag<T>();
-        private readonly object _lock = new object();
-        private readonly ILogger<AsyncDisposableCollection<T>> _logger;
-
-        public AsyncDisposableCollection(ILogger<AsyncDisposableCollection<T>>? logger = default)
-        {
-            _logger = logger ?? NullLogger<AsyncDisposableCollection<T>>.Instance;
-        }
+        private readonly AsyncLock _lock = new AsyncLock();
 
         public void Add(T item)
         {
             _items.Add(item);
         }
 
-        public bool Remove(T item)
+        public async Task<bool> RemoveAsync(T item)
         {
-            lock (_lock)
+            await using (await _lock.AcquireAsync())
             {
                 var items = _items.ToList();
                 var removed = items.Remove(item);
@@ -51,7 +47,7 @@ namespace Async.Collections
         {
             List<T> items;
 
-            lock (_lock)
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken))
             {
                 items = _items.ToList();
             }
@@ -66,19 +62,24 @@ namespace Async.Collections
 
         public async IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
         {
+            List<T> items;
+
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken))
+            {
+                items = _items.ToList();
+            }
+
             foreach (var item in _items)
             {
                 yield return item;
             }
-
-            await Task.CompletedTask;
         }
 
         public async ValueTask DisposeAsync()
         {
             List<T> itemsToDispose;
 
-            lock (_lock)
+            await using (await _lock.AcquireAsync())
             {
                 itemsToDispose = _items.ToList();
                 _items.Clear();
@@ -97,10 +98,7 @@ namespace Async.Collections
                         item.Dispose();
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "An error occurred while disposing an item.");
-                }
+                catch { }
             });
 
             await Task.WhenAll(tasks);

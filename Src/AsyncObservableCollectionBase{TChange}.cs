@@ -1,21 +1,23 @@
 ﻿// Copyright (c) FluentInjections Project. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
+using Async.Locks;
+
 using System.Collections.Generic;
 
 namespace Async.Collections
 {
-    public abstract class AsyncObservableCollectionBase<TChange> : IAsyncDisposable
+    public abstract class AsyncObservableCollectionBase<TChange> : IAsyncDisposable, IAsyncObservableCollectionBase<TChange>
     {
         private readonly List<Func<TChange, ValueTask>> _asyncObservers = new();
-        private readonly SemaphoreSlim _lock = new(1, 1);
+        private readonly AsyncLock _lock = new();
         private bool _disposed;
 
         protected async ValueTask NotifyObserversAsync(TChange change)
         {
             List<ValueTask> tasks;
 
-            lock (_asyncObservers)
+            await using (await _lock.AcquireAsync())
             {
                 tasks = _asyncObservers.Select(observer => observer(change)).ToList();
             }
@@ -23,11 +25,11 @@ namespace Async.Collections
             await Task.WhenAll(tasks.Select(vt => vt.AsTask()));
         }
 
-        public IDisposable Subscribe(Func<TChange, ValueTask> observer)
+        public async Task<IDisposable> SubscribeAsync(Func<TChange, ValueTask> observer)
         {
             EnsureNotDisposed();
 
-            lock (_asyncObservers)
+            await using (await _lock.AcquireAsync())
             {
                 _asyncObservers.Add(observer);
             }
@@ -51,17 +53,20 @@ namespace Async.Collections
 
         public async ValueTask DisposeAsync()
         {
-            await _lock.WaitAsync();
-            try
+            await using (await _lock.AcquireAsync().ConfigureAwait(false))
             {
-                if (_disposed) return;
-                _disposed = true;
-                _asyncObservers.Clear();
-            }
-            finally
-            {
-                _lock.Release();
-                _lock.Dispose();
+                try
+                {
+                    if (_disposed) return;
+                    _disposed = true;
+                    _asyncObservers.Clear();
+                }
+                finally
+                {
+                    await _lock.ReleaseAsync().ConfigureAwait(false);
+                    await _lock.DisposeAsync().ConfigureAwait(false);
+                }
+
             }
         }
 

@@ -2,7 +2,7 @@ using FluentAssertions;
 
 using Xunit;
 
-namespace Async.Collections.Tests
+namespace Async.Collections.Tests.AsyncBag
 {
     public class AsyncBagTests
     {

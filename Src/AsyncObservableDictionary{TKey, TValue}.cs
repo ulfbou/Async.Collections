@@ -14,8 +14,7 @@ namespace Async.Collections
             IDictionary<TKey, TValue>,
             IObservable<CollectionChange<TKey, TValue>>,
             IAsyncEnumerable<KeyValuePair<TKey, TValue>>,
-            IAsyncDisposable
-        where TKey : notnull
+            IAsyncDisposable, IAsyncObservableDictionary<TKey, TValue> where TKey : notnull
     {
         private readonly ConcurrentDictionary<TKey, TValue> _dictionary = new ConcurrentDictionary<TKey, TValue>();
         private readonly List<Func<CollectionChange<TKey, TValue>, ValueTask>> _asyncObservers = new List<Func<CollectionChange<TKey, TValue>, ValueTask>>();

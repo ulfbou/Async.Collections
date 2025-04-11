@@ -7,7 +7,7 @@ using Xunit;
 
 using System.Collections.Concurrent;
 
-namespace Async.Collections.Tests
+namespace Async.Collections.Tests.AsyncPartitionedCollection
 {
     public class AsyncPartitionedCollectionTests
     {

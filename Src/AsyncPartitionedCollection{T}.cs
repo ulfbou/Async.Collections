@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Async.Collections
 {
-    public class AsyncPartitionedCollection<T> : IAsyncEnumerable<T>, IAsyncDisposable
+    public class AsyncPartitionedCollection<T> : IAsyncEnumerable<T>, IAsyncDisposable, IAsyncPartitionedCollection<T>
     {
         private readonly ConcurrentDictionary<int, ConcurrentBag<T>> _partitions = new ConcurrentDictionary<int, ConcurrentBag<T>>();
         private readonly int _partitionSize;

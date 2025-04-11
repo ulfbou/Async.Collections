@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using Xunit;
 
-namespace Async.Collections.Tests
+namespace Async.Collections.Tests.AsyncObservableDictionary
 {
     public class ObservableConcurrentDictionaryTests
     {

@@ -7,7 +7,7 @@ using System.Collections.Concurrent;
 
 using Xunit;
 
-namespace Async.Collections.Tests
+namespace Async.Collections.Tests.AsyncGraphCollection
 {
     public class AsyncGraphCollectionTests
     {

@@ -6,7 +6,7 @@ using System.Collections.Generic;
 
 namespace Async.Collections
 {
-    public class AsyncBatchProcessor<T> : IAsyncDisposable
+    public class AsyncBatchProcessor<T> : IAsyncDisposable, IAsyncBatchProcessor<T>
     {
         private readonly ConcurrentQueue<T> _queue = new ConcurrentQueue<T>();
         private readonly int _batchSize;
@@ -14,6 +14,7 @@ namespace Async.Collections
         private readonly Func<List<T>, CancellationToken, ValueTask> _processBatchAsync;
         private readonly Func<Exception, List<T>, Task>? _onErrorAsync;
         private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
+        private readonly SemaphoreSlim _signal = new SemaphoreSlim(0);
         private Task? _batchProcessingTask;
         private bool _disposed;
 
@@ -27,7 +28,7 @@ namespace Async.Collections
             _batchTimeWindow = batchTimeWindow;
             _processBatchAsync = processBatchAsync;
             _onErrorAsync = onErrorAsync;
-            _batchProcessingTask = ProcessBatchesAsync();
+            _signal.Release();
         }
 
         public void Add(T item)
@@ -44,6 +45,8 @@ namespace Async.Collections
             {
                 _queue.Enqueue(item);
             }
+
+            _signal.Release();
         }
 
         private async Task ProcessBatchesAsync()
@@ -52,10 +55,15 @@ namespace Async.Collections
             {
                 while (!_cancellationTokenSource.Token.IsCancellationRequested)
                 {
-                    var batch = new List<T>();
+                    // Wait until signaled or cancellation is requested.
+                    await _signal.WaitAsync(_cancellationTokenSource.Token);
 
-                    // Collect a batch either by size or by time window.
-                    while (batch.Count < _batchSize && !_cancellationTokenSource.Token.IsCancellationRequested)
+                    var batch = new List<T>();
+                    var batchStartTime = DateTime.UtcNow;
+
+                    while (batch.Count < _batchSize &&
+                           DateTime.UtcNow - batchStartTime < _batchTimeWindow &&
+                           !_cancellationTokenSource.Token.IsCancellationRequested)
                     {
                         if (_queue.TryDequeue(out T? item))
                         {
@@ -63,10 +71,8 @@ namespace Async.Collections
                         }
                         else
                         {
-                            break;
+                            break; // Stop if the queue is empty.
                         }
-
-                        await Task.Delay(_batchTimeWindow, _cancellationTokenSource.Token);
                     }
 
                     if (batch.Count > 0)
@@ -77,6 +83,7 @@ namespace Async.Collections
             }
             catch (OperationCanceledException)
             {
+                // Graceful exit on cancellation.
             }
         }
 
@@ -92,6 +99,7 @@ namespace Async.Collections
             }
             catch
             {
+                // Swallow remaining exceptions if no handler is provided.
             }
         }
 
@@ -105,8 +113,9 @@ namespace Async.Collections
 
         public async Task FlushAsync(CancellationToken cancellationToken = default)
         {
-            var batch = new List<T>();
+            EnsureNotDisposed();
 
+            var batch = new List<T>();
             while (_queue.TryDequeue(out T? item))
             {
                 batch.Add(item);

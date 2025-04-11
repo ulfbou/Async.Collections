@@ -7,7 +7,7 @@ namespace Async.Collections
     using System.Threading;
     using System.Threading.Tasks;
 
-    public class AsyncSet<T> : IAsyncDisposable where T : notnull
+    public class AsyncSet<T> : IAsyncDisposable, IAsyncSet<T> where T : notnull
     {
         private readonly ConcurrentDictionary<T, byte> _set = new ConcurrentDictionary<T, byte>();
         private readonly SemaphoreSlim _lock = new SemaphoreSlim(1, 1); // AsyncLock for thread-safe access.

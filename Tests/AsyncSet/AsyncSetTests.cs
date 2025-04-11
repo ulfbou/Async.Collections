@@ -7,7 +7,7 @@ using FluentAssertions;
 
 using Xunit;
 
-namespace Async.Collections.Tests
+namespace Async.Collections.Tests.AsyncSet
 {
     public class AsyncSetTests
     {

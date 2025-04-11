@@ -1,30 +1,25 @@
 ﻿// Copyright (c) FluentInjections Project. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
+using Async.Locks;
+
 using System.Collections.Concurrent;
 
 namespace Async.Collections
 {
-    public class AsyncQueue<T> : IAsyncDisposable
+    public class AsyncQueue<T> : IAsyncDisposable, IAsyncQueue<T>
     {
         private readonly ConcurrentQueue<T> _queue = new ConcurrentQueue<T>();
-        private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(0);
-        private readonly SemaphoreSlim _lock = new SemaphoreSlim(1, 1); // Acts as an AsyncLock.
+        private readonly AsyncLock _lock = new AsyncLock();
         private bool _disposed;
 
         public async ValueTask EnqueueAsync(T item, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
-            await _lock.WaitAsync(cancellationToken);
 
-            try
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
             {
                 _queue.Enqueue(item);
-                _semaphore.Release();
-            }
-            finally
-            {
-                _lock.Release();
             }
         }
 
@@ -32,42 +27,30 @@ namespace Async.Collections
         {
             EnsureNotDisposed();
 
-            await _semaphore.WaitAsync(cancellationToken);
-            await _lock.WaitAsync(cancellationToken);
-
-            try
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
             {
                 if (_queue.TryDequeue(out T? item))
                 {
                     return item;
                 }
+            }
 
-                throw new InvalidOperationException("Queue is empty after semaphore release.");
-            }
-            finally
-            {
-                _lock.Release();
-            }
+            throw new InvalidOperationException("Queue is empty after lock acquisition.");
         }
 
         public async ValueTask<(bool Success, T Item)> TryPeekAsync(CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
-            await _lock.WaitAsync(cancellationToken);
 
-            try
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
             {
                 if (_queue.TryPeek(out T? item))
                 {
                     return (true, item);
                 }
+            }
 
-                return (false, default!);
-            }
-            finally
-            {
-                _lock.Release();
-            }
+            return (false, default!);
         }
 
         public int Count
@@ -75,43 +58,41 @@ namespace Async.Collections
             get
             {
                 EnsureNotDisposed();
-                _lock.Wait();
 
-                try
+                lock (_lock)
                 {
                     return _queue.Count;
-                }
-                finally
-                {
-                    _lock.Release();
                 }
             }
         }
 
         private void EnsureNotDisposed()
         {
-            if (_disposed)
+            lock (_lock)
             {
-                throw new ObjectDisposedException(nameof(ConcurrentQueue<T>));
+                if (_disposed)
+                {
+                    throw new ObjectDisposedException(nameof(AsyncQueue<T>));
+                }
             }
         }
 
         public async ValueTask DisposeAsync()
         {
-            await _lock.WaitAsync();
-            try
+            if (_disposed)
             {
-                if (_disposed) return;
-                _disposed = true;
-            }
-            finally
-            {
-                _lock.Release();
+                return;
             }
 
-            _semaphore.Dispose();
-            _lock.Dispose();
-            await Task.CompletedTask;
+            await using var releaser = await _lock.AcquireAsync().ConfigureAwait(false);
+
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _queue.Clear();
         }
     }
 }

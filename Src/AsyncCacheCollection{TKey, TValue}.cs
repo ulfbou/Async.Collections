@@ -1,22 +1,23 @@
 ﻿// Copyright (c) FluentInjections Project. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
+using Async.Locks;
+
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Async.Collections
 {
-    public class AsyncCacheCollection<TKey, TValue> : IAsyncEnumerable<KeyValuePair<TKey, TValue>>, IAsyncDisposable
-        where TKey : notnull
+    public class AsyncCacheCollection<TKey, TValue> : IAsyncEnumerable<KeyValuePair<TKey, TValue>>, IAsyncDisposable, IAsyncCacheCollection<TKey, TValue> where TKey : notnull
     {
         private readonly ConcurrentDictionary<TKey, CacheItem<TValue>> _cache = new ConcurrentDictionary<TKey, CacheItem<TValue>>();
         private readonly TimeSpan _evictionInterval;
         private readonly int? _maxSize;
         private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
         private readonly Func<Exception, Task>? _onErrorAsync;
+        private readonly AsyncLock _lock = new AsyncLock();
         private Task? _evictionTask;
-        private readonly object _lock = new object();
         private bool _disposed;
 
         public AsyncCacheCollection(TimeSpan evictionInterval, int? maxSize = null, Func<Exception, Task>? onErrorAsync = null)
@@ -68,7 +69,7 @@ namespace Async.Collections
                 {
                     await Task.Delay(_evictionInterval, _cancellationTokenSource.Token);
 
-                    lock (_lock)
+                    await using (await _lock.AcquireAsync())
                     {
                         var now = DateTime.UtcNow;
 
@@ -126,7 +127,7 @@ namespace Async.Collections
         {
             EnsureNotDisposed();
 
-            lock (_lock)
+            await using (await _lock.AcquireAsync())
             {
                 foreach (var kv in _cache)
                 {
@@ -139,7 +140,7 @@ namespace Async.Collections
 
         public async ValueTask DisposeAsync()
         {
-            lock (_lock)
+            await using (await _lock.AcquireAsync())
             {
                 if (_disposed) return;
                 _disposed = true;

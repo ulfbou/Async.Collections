@@ -1,161 +1,140 @@
 ﻿// Copyright (c) FluentInjections Project. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
+using Async.Locks;
+
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 
 namespace Async.Collections
 {
-    public class AsyncGraphCollection<TNode, TNodeId> : IAsyncEnumerable<KeyValuePair<TNode, TNodeId>>, IAsyncDisposable where TNodeId : notnull
+    public class AsyncGraphCollection<TNode, TNodeId> : IAsyncEnumerable<KeyValuePair<TNode, TNodeId>>, IAsyncDisposable, IAsyncGraphCollection<TNode, TNodeId> where TNodeId : notnull
     {
         private readonly ConcurrentDictionary<TNodeId, TNode> _nodes = new ConcurrentDictionary<TNodeId, TNode>();
         private readonly ConcurrentDictionary<TNodeId, ConcurrentDictionary<TNodeId, byte>> _edges = new ConcurrentDictionary<TNodeId, ConcurrentDictionary<TNodeId, byte>>();
         private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
-        private readonly object _lock = new object();
+        private readonly AsyncLock _lock = new AsyncLock();
         private bool _disposed;
 
         public async ValueTask AddNodeAsync(TNodeId nodeId, TNode node, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
 
-            await Task.Run(() =>
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken))
             {
-                lock (_lock)
-                {
-                    _nodes.TryAdd(nodeId, node);
-                    _edges.TryAdd(nodeId, new ConcurrentDictionary<TNodeId, byte>());
-                }
-            }, cancellationToken);
+                _nodes.TryAdd(nodeId, node);
+                _edges.TryAdd(nodeId, new ConcurrentDictionary<TNodeId, byte>());
+            }
         }
 
         public async ValueTask AddEdgeAsync(TNodeId fromNodeId, TNodeId toNodeId, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
 
-            await Task.Run(() =>
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken))
             {
-                lock (_lock)
+                if (_edges.TryGetValue(fromNodeId, out var neighbors))
                 {
-                    if (_edges.TryGetValue(fromNodeId, out var neighbors))
-                    {
-                        neighbors.TryAdd(toNodeId, 0);
-                    }
+                    neighbors.TryAdd(toNodeId, 0);
                 }
-            }, cancellationToken);
+            }
         }
 
         public async ValueTask<bool> RemoveNodeAsync(TNodeId nodeId, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
 
-            return await Task.Run(() =>
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken))
             {
-                lock (_lock)
+                _nodes.TryRemove(nodeId, out _);
+                _edges.TryRemove(nodeId, out _);
+
+                foreach (var neighbors in _edges.Values)
                 {
-                    _nodes.TryRemove(nodeId, out _);
-                    _edges.TryRemove(nodeId, out _);
-
-                    foreach (var neighbors in _edges.Values)
-                    {
-                        neighbors.TryRemove(nodeId, out _);
-                    }
-
-                    return true;
+                    neighbors.TryRemove(nodeId, out _);
                 }
-            }, cancellationToken);
+
+                return true;
+            }
         }
 
         public async ValueTask<bool> RemoveEdgeAsync(TNodeId fromNodeId, TNodeId toNodeId, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
 
-            return await Task.Run(() =>
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken))
             {
-                lock (_lock)
+                if (_edges.TryGetValue(fromNodeId, out var neighbors))
                 {
-                    if (_edges.TryGetValue(fromNodeId, out var neighbors))
-                    {
-                        return neighbors.TryRemove(toNodeId, out _);
-                    }
-
-                    return false;
+                    return neighbors.TryRemove(toNodeId, out _);
                 }
-            }, cancellationToken);
+
+                return false;
+            }
         }
 
         public async ValueTask<IEnumerable<TNodeId>> GetNeighborsAsync(TNodeId nodeId, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
 
-            return await Task.Run(() =>
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken))
             {
-                lock (_lock)
+                if (_edges.TryGetValue(nodeId, out var neighbors))
                 {
-                    if (_edges.TryGetValue(nodeId, out var neighbors))
-                    {
-                        return neighbors.Keys.ToList();
-                    }
-
-                    return Enumerable.Empty<TNodeId>();
+                    return neighbors.Keys.ToList();
                 }
-            }, cancellationToken);
+
+                return Enumerable.Empty<TNodeId>();
+            }
         }
 
         public async ValueTask<IEnumerable<TNodeId>> DepthFirstSearchAsync(TNodeId startNodeId, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();
 
-            return await Task.Run(async () =>
+            var visited = new HashSet<TNodeId>();
+            var stack = new Stack<TNodeId>();
+            var result = new List<TNodeId>();
+
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken))
             {
-                var visited = new HashSet<TNodeId>();
-                var stack = new Stack<TNodeId>();
-                var result = new List<TNodeId>();
-
-                lock (_lock)
+                if (_nodes.ContainsKey(startNodeId))
                 {
-                    if (_nodes.ContainsKey(startNodeId))
-                    {
-                        stack.Push(startNodeId);
-                    }
+                    stack.Push(startNodeId);
                 }
+            }
 
-                while (stack.Count > 0)
+            while (stack.Count > 0)
+            {
+                var currentNodeId = stack.Pop();
+
+                if (!visited.Contains(currentNodeId))
                 {
-                    TNodeId currentNodeId;
+                    visited.Add(currentNodeId);
+                    result.Add(currentNodeId);
 
-                    lock (_lock)
+                    var neighbors = await GetNeighborsAsync(currentNodeId, cancellationToken);
+                    foreach (var neighborId in neighbors)
                     {
-                        currentNodeId = stack.Pop();
-                    }
-
-                    if (!visited.Contains(currentNodeId))
-                    {
-                        visited.Add(currentNodeId);
-                        result.Add(currentNodeId);
-
-                        var neighbors = await GetNeighborsAsync(currentNodeId, cancellationToken);
-                        foreach (var neighborId in neighbors)
+                        if (!visited.Contains(neighborId))
                         {
-                            if (!visited.Contains(neighborId))
-                            {
-                                lock (_lock)
-                                {
-                                    stack.Push(neighborId);
-                                }
-                            }
+                            stack.Push(neighborId);
                         }
                     }
                 }
+            }
 
-                return result;
-            }, cancellationToken);
+            return result;
         }
 
         private void EnsureNotDisposed()
         {
-            if (_disposed)
+            lock (_lock)
             {
-                throw new ObjectDisposedException(nameof(AsyncGraphCollection<TNode, TNodeId>));
+                if (_disposed)
+                {
+                    throw new ObjectDisposedException(nameof(AsyncGraphCollection<TNode, TNodeId>));
+                }
             }
         }
 
@@ -163,7 +142,8 @@ namespace Async.Collections
         {
             EnsureNotDisposed();
             List<KeyValuePair<TNodeId, TNode>> nodes;
-            lock (_lock)
+
+            await using (await _lock.AcquireAsync(cancellationToken: cancellationToken))
             {
                 nodes = _nodes.ToList();
             }
@@ -172,55 +152,51 @@ namespace Async.Collections
             {
                 yield return new KeyValuePair<TNode, TNodeId>(node.Value, node.Key);
             }
-
-            await Task.CompletedTask;
         }
 
         public async ValueTask DisposeAsync()
         {
-            lock (_lock)
+            if (_disposed) return;
+
+            await using (await _lock.AcquireAsync())
             {
                 if (_disposed) return;
                 _disposed = true;
             }
 
             _cancellationTokenSource.Cancel();
-            await Task.CompletedTask;
             _cancellationTokenSource.Dispose();
+            await Task.CompletedTask;
         }
 
-        internal ValueTask<bool> ContainsNodeAsync(TNodeId nodeId)
+        internal async ValueTask<bool> ContainsNodeAsync(TNodeId nodeId)
         {
-            lock (_lock)
+            await using (await _lock.AcquireAsync())
             {
-                return ValueTask.FromResult(_nodes.ContainsKey(nodeId));
+                return _nodes.ContainsKey(nodeId);
             }
         }
 
-        internal ValueTask<TNode?> GetNodeAsync(TNodeId nodeId)
+        internal async ValueTask<TNode?> GetNodeAsync(TNodeId nodeId)
         {
-            lock (_lock)
+            await using (await _lock.AcquireAsync())
             {
-                if (_nodes.TryGetValue(nodeId, out TNode? node))
-                {
-                    return ValueTask.FromResult<TNode?>(node);
-                }
+                _nodes.TryGetValue(nodeId, out var node);
+                return node;
             }
-
-            return ValueTask.FromResult(default(TNode));
         }
 
-        internal ValueTask<bool> ContainsEdgeAsync(TNodeId fromNodeId, TNodeId toNodeId)
+        internal async ValueTask<bool> ContainsEdgeAsync(TNodeId fromNodeId, TNodeId toNodeId)
         {
-            lock (_lock)
+            await using (await _lock.AcquireAsync())
             {
                 if (_edges.TryGetValue(fromNodeId, out var neighbors))
                 {
-                    return ValueTask.FromResult(neighbors.ContainsKey(toNodeId));
+                    return neighbors.ContainsKey(toNodeId);
                 }
-            }
 
-            return ValueTask.FromResult(false);
+                return false;
+            }
         }
     }
 }
