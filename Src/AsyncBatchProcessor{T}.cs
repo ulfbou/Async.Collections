@@ -1,4 +1,4 @@
-﻿// Copyright (c) FluentInjections Project. All rights reserved.
+// Copyright (c) FluentInjections Project. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 using System.Collections.Concurrent;
@@ -15,7 +15,7 @@ namespace Async.Collections
         private readonly Func<Exception, List<T>, Task>? _onErrorAsync;
         private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
         private readonly SemaphoreSlim _signal = new SemaphoreSlim(0);
-        private Task? _batchProcessingTask;
+        private Task? _batchProcessingTask = null;
         private bool _disposed;
 
         public AsyncBatchProcessor(
